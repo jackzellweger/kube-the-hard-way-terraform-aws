@@ -121,53 +121,89 @@ resource "aws_eip" "lb_ip" {
   // Do we need a region?
 }
 
-
-// Instances
-// Ubuntu Server 20.04
+// Control Plane nodes
 resource "aws_instance" "kubernetes_control_plane_instances" {
-  // GCloud Command:
-  # for i in 0 1 2; do
-  # gcloud compute instances create controller-${i} \
-  #   --async \
-  #   --boot-disk-size 200GB \
-  #   --can-ip-forward \
-  #   --image-family ubuntu-2004-lts \
-  #   --image-project ubuntu-os-cloud \
-  #   --machine-type e2-standard-2 \
-  #   --private-network-ip 10.240.0.1${i} \
-  #   --scopes compute-rw,storage-ro,service-management,service-control,logging-write,monitoring \
-  #   --subnet kubernetes \
-  #   --tags kubernetes-the-hard-way,controller
-  # done
-
-  // -----
 
   for_each = toset([ "1", "2", "3" ])
-
+  
   tags = {
     Name = "controller-${each.value}"
   }
 
-  ami = "ami-05fb0b8c1424f266b"
+  ami = "ami-05fb0b8c1424f266b" // Ubuntu Server 20.04
   instance_type = "t2.medium"
-  security_groups = [aws_security_group.vpc_security_group]
-  subnet_id = aws_subnet.kubernetes
-
+  security_groups = [aws_security_group.vpc_security_group.id]
+  subnet_id = aws_subnet.kubernetes.id
   root_block_device {
-    volume_size = 200 // In GB
+    volume_size = 20 // In GB
   }
 }
 
-resource "aws_iam_role" "control-plane-node-iam-role" {
-  name = "control-plane-node-iam-role"
-
-
+// The attachment of the policy for the control plane node to the role associate with the control plane node
+resource "aws_iam_role_policy_attachment" "control-plane-policy-attachment" {
+  role       = aws_iam_role.control-plane-node-service-role.name
+  policy_arn = aws_iam_policy.control-plane-policy.arn
 }
 
-resource "aws_iam_policy_attachment" "control-plane-node-iam-role-policy-attachment" {
-  // --scopes compute-rw,storage-ro,service-management,service-control,logging-write,monitoring
+// Service Role for control plane node
+resource "aws_iam_role" "control-plane-node-service-role" {
+  name = "control-plane-node-service-role"
+  assume_role_policy = data.aws_iam_policy_document.assume-role-policy-ec2.json
 }
 
+// The policy we will attach to the service role that our control plane will have
+resource "aws_iam_policy" "control-plane-policy" {
+  name        = "control-plane-policy"
+  description = "A policy that grants permissions to the Kube control plane equivalent to GCP scopes"
+  policy      = data.aws_iam_policy_document.policy-doc-for-control-plane-node.json
+}
+
+// Policy document we attach to our policy
+data "aws_iam_policy_document" "policy-doc-for-control-plane-node" {
+  // EC2 Full Access
+  statement {
+    actions   = ["ec2:*"]
+    resources = ["*"]
+  }
+
+  // S3 Read-Only Access
+  statement {
+    actions   = ["s3:Get*", "s3:List*"]
+    resources = ["arn:aws:s3:::*"]
+  }
+
+  // CloudWatch Full Access
+  statement {
+    actions   = ["cloudwatch:*"]
+    resources = ["*"]
+  }
+
+  // CloudWatch Logs Write Access
+  statement {
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["arn:aws:logs:*:*:*"]
+  }
+  
+}
+
+// Assume Role Policy Document
+// Any EC2 can assume this role
+data "aws_iam_policy_document" "assume-role-policy-ec2" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"] // Assuming this role is for an EC2 instance
+    }
+  }
+}
+
+// Worker nodes
+
+/*
+
+*/
 
 
 
