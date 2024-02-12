@@ -1,0 +1,6 @@
+allowUnfree: true
+inputs:
+  devenv:
+    url: github:cachix/devenv/python-rewrite
+  nixpkgs:
+    url: github:NixOS/nixpkgs/f3e89babd4a963df36371b026ebc377221692982

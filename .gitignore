@@ -1,3 +1,21 @@
+# Other
+# xx
+
+# Defaults
+devenv.local.nix
+.devenv.flake.nix
+.devenv/
+.aws/credentials
+**/.terragrunt-cache
+**/.tfstate
+**/tilt.trigger
+.podman/.token_seed*
+.sfdx/
+IlluminatedCloud/
+packages/playground/*
+.DS_Store
+
+
 # Local .terraform directories
 **/.terraform/*
 
