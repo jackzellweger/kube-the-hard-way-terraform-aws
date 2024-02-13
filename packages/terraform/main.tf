@@ -12,6 +12,11 @@ provider "aws" {
 
 // Our VPC
 resource "aws_vpc" "kubernetes-the-hard-way" {
+
+  tags = {
+    Name = "kubernetes-the-hard-way"
+  }
+
   cidr_block = "10.240.0.0/24"
 }
 
@@ -20,6 +25,36 @@ resource "aws_subnet" "kubernetes" {
   vpc_id = aws_vpc.kubernetes-the-hard-way.id
   cidr_block = "10.240.0.0/24"
 }
+
+// Gateway
+resource "aws_internet_gateway" "kubernetes_gateway" {
+  vpc_id = aws_vpc.kubernetes-the-hard-way.id
+
+  tags = {
+    Name = "kubernetes-the-hard-way-gateway"
+  }
+}
+
+// Route table for the VPC
+resource "aws_route_table" "kubernetes_route_table" {
+  vpc_id = aws_vpc.kubernetes-the-hard-way.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.kubernetes_gateway.id
+  }
+
+  tags = {
+    Name = "kubernetes-the-hard-way-route-table"
+  }
+}
+
+// Route table vpc subnet association
+resource "aws_route_table_association" "kubernetes_subnet_association" {
+  subnet_id      = aws_subnet.kubernetes.id
+  route_table_id = aws_route_table.kubernetes_route_table.id
+}
+
 
 // Security group that defines our VPC's ingress/egress rules
 resource "aws_security_group" "vpc_security_group" {
@@ -111,32 +146,70 @@ resource "aws_security_group" "vpc_security_group" {
 
 }
 
+/* TODO: Uncomment when we have more IPs available
 // Static IP for our load balancer
-resource "aws_eip" "lb_ip" {
+// TODO: Do we need to create a gateway and associate this with it?
+// Let's wait and see
+resource "aws_eip" "kubernetes-the-hard-way" {
+
   // GCloud Command:
   // gcloud compute addresses create kubernetes-the-hard-way \
   // --region $(gcloud config get-value compute/region)
-  
+
+  tags = {
+    Name = "kubernetes-the-hard-way"
+  }
+
   domain = "vpc"
-  // Do we need a region?
+
 }
+*/
 
 // Control Plane nodes
 resource "aws_instance" "kubernetes_control_plane_instances" {
-
-  for_each = toset([ "1", "2", "3" ])
+  
+  for_each = toset([ "0", "1"]) // TODO: Increase to "0", "1", "2" after request
   
   tags = {
     Name = "controller-${each.value}"
+    Project = "kubernetes-the-hard-way"
+    InstanceType = "controller"
   }
 
   ami = "ami-05fb0b8c1424f266b" // Ubuntu Server 20.04
   instance_type = "t2.medium"
   security_groups = [aws_security_group.vpc_security_group.id]
   subnet_id = aws_subnet.kubernetes.id
+  private_ip = "10.240.0.1${each.value}"
+  
   root_block_device {
     volume_size = 20 // In GB
   }
+
+  source_dest_check = false // IP forwarding, 'false' is enabled
+
+  iam_instance_profile = aws_iam_instance_profile.control_plane_instance_profile.name
+
+}
+
+// EIPs for contol plane nodes
+resource "aws_eip" "control_plane_eip" {
+  for_each    = toset(["0", "1"]) // TODO: Increase to "0", "1", "2" after request
+  domain      = "vpc"
+}
+
+// EIP-instance association for control plane nodes
+resource "aws_eip_association" "control_plane_eip_assoc" {
+  for_each = aws_instance.kubernetes_control_plane_instances
+
+  instance_id   = each.value.id
+  allocation_id = aws_eip.control_plane_eip[each.key].id
+}
+
+// Control plane node profile
+resource "aws_iam_instance_profile" "control_plane_instance_profile" {
+  name = "control-plane-instance-profile"
+  role = aws_iam_role.control-plane-node-service-role.name
 }
 
 // The attachment of the policy for the control plane node to the role associate with the control plane node
@@ -158,8 +231,12 @@ resource "aws_iam_policy" "control-plane-policy" {
   policy      = data.aws_iam_policy_document.policy-doc-for-control-plane-node.json
 }
 
-// Policy document we attach to our policy
+// Policy document we attach to our policy (GCloud 'scopes' equiv)
 data "aws_iam_policy_document" "policy-doc-for-control-plane-node" {
+
+  // GCloud Command:
+  // --scopes compute-rw,storage-ro,service-management,service-control,logging-write,monitoring --subnet kubernetes
+
   // EC2 Full Access
   statement {
     actions   = ["ec2:*"]
@@ -186,8 +263,7 @@ data "aws_iam_policy_document" "policy-doc-for-control-plane-node" {
   
 }
 
-// Assume Role Policy Document
-// Any EC2 can assume this role
+// Assume Role Policy Document, any EC2 can assume this role
 data "aws_iam_policy_document" "assume-role-policy-ec2" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -200,10 +276,54 @@ data "aws_iam_policy_document" "assume-role-policy-ec2" {
 }
 
 // Worker nodes
+resource "aws_instance" "kubernetes_worker_instances" {
+  
+  for_each = toset([ "0", "1" ]) // TODO: Increase to "0", "1", "2" after request
 
-/*
+  tags = {
+    Name = "worker-${each.value}"
+    Project = "kubernetes-the-hard-way"
+    InstanceType = "worker"
+  }
 
-*/
+  ami = "ami-05fb0b8c1424f266b" // Ubuntu Server 20.04
+  instance_type = "t2.medium"
+  security_groups = [aws_security_group.vpc_security_group.id]
+  subnet_id = aws_subnet.kubernetes.id
+  private_ip = "10.240.0.2${each.value}"
+
+  root_block_device {
+    volume_size = 20 // In GB
+  }
+
+  source_dest_check = false // IP forwarding, 'false' is enabled
+
+  // Role for worker is same as control
+  iam_instance_profile = aws_iam_instance_profile.control_plane_instance_profile.name
+
+  // Inject the correct CIDR block for pods to expose to node
+  user_data = <<-EOF
+                #!/bin/bash
+                # Store the pod-cidr value for later use
+                echo "10.200.${each.value}.0/24" > /home/ubuntu/pod-cidr
+              EOF
+
+}
+
+// EIPs for worker nodes
+resource "aws_eip" "worker_eip" {
+  for_each    = toset(["0", "1"]) // TODO: Increase to "0", "1", "2" after request
+  domain      = "vpc"
+}
+
+// EIP-instance association for worker nodes
+resource "aws_eip_association" "worker_eip_assoc" {
+  for_each = aws_instance.kubernetes_worker_instances
+
+  instance_id   = each.value.id
+  allocation_id = aws_eip.worker_eip[each.key].id
+}
+
 
 
 
