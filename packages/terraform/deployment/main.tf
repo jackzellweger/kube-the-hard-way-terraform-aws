@@ -6,20 +6,14 @@ provider "aws" {
 
 // ----- Variables
 
-variable "control_plane_instances" {
-  type = map(string)
-  default = {
-    "control-1" = "0",
-    "control-2" = "1"
-  }
+variable "control_plane_instance_count" {
+  type = number
+  default = 2
 }
 
-variable "worker_instances" {
-  type = map(string)
-  default = {
-    "worker-1" = "0",
-    "worker-2" = "1"
-  }
+variable "worker_instance_count" {
+  type = number
+  default = 2
 }
 
 // ----- Resources
@@ -181,20 +175,20 @@ resource "aws_eip" "kubernetes-the-hard-way" {
 
 // Control Plane nodes
 resource "aws_instance" "kubernetes_control_plane_instances" {
-  
-  for_each = toset([ "0", "1"]) // TODO: Increase to "0", "1", "2" after request
+
+  count = var.control_plane_instance_count
   
   tags = {
-    Name = "controller-${each.value}"
+    Name = "controller-${count.index}"
     Project = "kubernetes-the-hard-way"
     InstanceType = "controller"
   }
 
   ami = "ami-05fb0b8c1424f266b" // Ubuntu Server 20.04
-  instance_type = "t2.medium"
+  instance_type = "t2.micro"
   security_groups = [aws_security_group.vpc_security_group.id]
   subnet_id = aws_subnet.kubernetes.id
-  private_ip = "10.240.0.1${each.value}"
+  private_ip = "10.240.0.1${count.index}"
   
   root_block_device {
     volume_size = 20 // In GB
@@ -208,17 +202,17 @@ resource "aws_instance" "kubernetes_control_plane_instances" {
 
 // EIPs for contol plane nodes
 resource "aws_eip" "control_plane_eip" {
-  // TODO: Actually, I think you can use for_each with aws_instances.instances....
-  for_each    = toset(["0", "1"]) // TODO: Increase to "0", "1", "2" after request
+  count    = var.control_plane_instance_count
   domain      = "vpc"
+  depends_on = [ aws_instance.kubernetes_control_plane_instances ]
 }
 
 // EIP-instance association for control plane nodes
 resource "aws_eip_association" "control_plane_eip_assoc" {
-  for_each = aws_instance.kubernetes_control_plane_instances
+  count    = var.control_plane_instance_count
 
-  instance_id   = each.value.id
-  allocation_id = aws_eip.control_plane_eip[each.key].id
+  instance_id   = aws_instance.kubernetes_control_plane_instances[count.index].id
+  allocation_id = aws_eip.control_plane_eip[count.index].id
 }
 
 // Control plane node profile
@@ -293,19 +287,19 @@ data "aws_iam_policy_document" "assume-role-policy-ec2" {
 // Worker nodes
 resource "aws_instance" "kubernetes_worker_instances" {
   
-  for_each = toset([ "0", "1" ]) // TODO: Increase to "0", "1", "2" after request
+  count = var.worker_instance_count
 
   tags = {
-    Name = "worker-${each.value}"
+    Name = "worker-${count.index}"
     Project = "kubernetes-the-hard-way"
     InstanceType = "worker"
   }
 
   ami = "ami-05fb0b8c1424f266b" // Ubuntu Server 20.04
-  instance_type = "t2.medium"
+  instance_type = "t2.micro"
   security_groups = [aws_security_group.vpc_security_group.id]
   subnet_id = aws_subnet.kubernetes.id
-  private_ip = "10.240.0.2${each.value}"
+  private_ip = "10.240.0.2${count.index}"
 
   root_block_device {
     volume_size = 20 // In GB
@@ -320,23 +314,24 @@ resource "aws_instance" "kubernetes_worker_instances" {
   user_data = <<-EOF
                 #!/bin/bash
                 # Store the pod-cidr value for later use
-                echo "10.200.${each.value}.0/24" > /home/ubuntu/pod-cidr
+                echo "10.200.${count.index}.0/24" > /home/ubuntu/pod-cidr
               EOF
 
 }
 
 // EIPs for worker nodes
 resource "aws_eip" "worker_eip" {
-  for_each    = toset(["0", "1"]) // TODO: Increase to "0", "1", "2" after request
+  count    = var.worker_instance_count
   domain      = "vpc"
+  depends_on = [ aws_instance.kubernetes_worker_instances ]
 }
 
 // EIP-instance association for worker nodes
 resource "aws_eip_association" "worker_eip_assoc" {
-  for_each = aws_instance.kubernetes_worker_instances
+  count    = var.worker_instance_count
 
-  instance_id   = each.value.id
-  allocation_id = aws_eip.worker_eip[each.key].id
+  instance_id = aws_instance.kubernetes_worker_instances[count.index].id
+  allocation_id = aws_eip.worker_eip[count.index].id
 }
 
 /*
