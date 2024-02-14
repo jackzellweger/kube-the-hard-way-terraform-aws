@@ -6,7 +6,21 @@ provider "aws" {
 
 // ----- Variables
 
+variable "control_plane_instances" {
+  type = map(string)
+  default = {
+    "control-1" = "0",
+    "control-2" = "1"
+  }
+}
 
+variable "worker_instances" {
+  type = map(string)
+  default = {
+    "worker-1" = "0",
+    "worker-2" = "1"
+  }
+}
 
 // ----- Resources
 
@@ -194,6 +208,7 @@ resource "aws_instance" "kubernetes_control_plane_instances" {
 
 // EIPs for contol plane nodes
 resource "aws_eip" "control_plane_eip" {
+  // TODO: Actually, I think you can use for_each with aws_instances.instances....
   for_each    = toset(["0", "1"]) // TODO: Increase to "0", "1", "2" after request
   domain      = "vpc"
 }
@@ -324,9 +339,15 @@ resource "aws_eip_association" "worker_eip_assoc" {
   allocation_id = aws_eip.worker_eip[each.key].id
 }
 
+/*
+resource "null_resource" "test_null_resource" {
+    for_each = aws_instance.kubernetes_worker_instances
+    depends_on = [aws_instance.kubernetes_worker_instances]
 
-
-
+    each.
+    
+}
+*/
 
 
 
