@@ -311,6 +311,7 @@ resource "aws_instance" "kubernetes_worker_instances" {
   iam_instance_profile = aws_iam_instance_profile.control_plane_instance_profile.name
 
   // Inject the correct CIDR block for pods to expose to node
+  // TODO: Maybe find a way to make this a local configurable variable
   user_data = <<-EOF
                 #!/bin/bash
                 # Store the pod-cidr value for later use
@@ -342,6 +343,7 @@ resource "null_resource" "generate_certs_no_template" {
     always_run = "${timestamp()}"
   }
 
+  // This doesn't depend on any information created dynamically when we run terraform apply
   provisioner "local-exec" {
     command = "zsh ../../scripts/cert-authority.sh && zsh ../../scripts/admin-client.sh"
   }
@@ -366,13 +368,34 @@ resource "null_resource" "generate_certs_template" {
     ]
 
   provisioner "local-exec" {
-    // TODO: Could be wrong
-    command = "zsh ../../scripts/client.sh ${aws_instance.kubernetes_worker_instances.tags["InstanceType"]}"
+    // TODO: Make this dynamic on worker names and numbers
+    // Using bash instead of zsh because it's difficult to read in the array of IPs with zsh
+    command = "bash ../../scripts/client.sh worker ${var.worker_instance_count} \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
   }
 
 }
 
+/*
+// Controller manager client certificate
+resource "null_resource" "generate_certs_template" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
 
+  // Enforces the DAG
+  depends_on = [
+    null_resource.generate_certs_template
+  ]
+
+  provisioner "local-exec" {
+    // TODO: Make this dynamic on worker names and numbers
+    command = "bash ../../scripts/client.sh worker ${var.worker_instance_count} \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
+  }
+
+}
+*/
 
 
 

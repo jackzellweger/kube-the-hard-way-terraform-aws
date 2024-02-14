@@ -2,15 +2,15 @@ base_name=$1 # Base name for workers
 
 num_workers=$2 # Number of workers
 
-external_ips=($3)
+# IFS=' ' read -r -A external_ips <<< "$3"
 
-internal_ips=($4)
+# old
+external_ips=($3)
 
 for i in $(seq 0 $((num_workers - 1))); do
     # vars for loop
     instance="${base_name}-${i}"
     external_ip=${external_ips[$i]}
-    internal_ip=${internal_ips[$i]}
 
     # work
     cat > ${instance}-csr.json <<EOF
@@ -38,11 +38,22 @@ EOF
     #INTERNAL_IP=$(gcloud compute instances describe ${instance} \
     #--format 'value(networkInterfaces[0].networkIP)')
 
+    echo LOOP NUMBER ${i}
+    echo instance:
+    echo ${instance}
+    echo external ip:
+    echo ${external_ip}
+    echo hostnames:
+    echo ${instance},${external_ip},10.200.${i}.0/24
+    echo
+
     cfssl gencert \
     -ca=ca.pem \
     -ca-key=ca-key.pem \
     -config=ca-config.json \
-    -hostname=${instance},${external_ip},${external_ip} \
+    -hostname=${instance},${external_ip},10.200.${i}.0/24 \
     -profile=kubernetes \
     ${instance}-csr.json | cfssljson -bare ${instance}
 done
+
+echo ${external_ips}
