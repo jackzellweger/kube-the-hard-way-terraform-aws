@@ -23,7 +23,7 @@ for i in $(seq 0 $((num_workers - 1))); do
         "names": [
             {
                 "C": "US",
-                "L": "New York",
+                "L": "New York City",
                 "O": "system:nodes",
                 "OU": "Kubernetes The Hard Way",
                 "ST": "New York"

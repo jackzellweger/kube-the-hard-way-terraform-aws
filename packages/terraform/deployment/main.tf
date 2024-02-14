@@ -368,14 +368,13 @@ resource "null_resource" "generate_certs_template" {
     ]
 
   provisioner "local-exec" {
-    // TODO: Make this dynamic on worker names and numbers
+    // TODO: Make this dynamic: on worker names
     // Using bash instead of zsh because it's difficult to read in the array of IPs with zsh
     command = "bash ../../scripts/client.sh worker ${var.worker_instance_count} \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
   }
 
 }
 
-/*
 // Controller manager client certificate
 resource "null_resource" "generate_certs_template" {
   
@@ -390,12 +389,10 @@ resource "null_resource" "generate_certs_template" {
   ]
 
   provisioner "local-exec" {
-    // TODO: Make this dynamic on worker names and numbers
-    command = "bash ../../scripts/client.sh worker ${var.worker_instance_count} \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
+    command = "bash echo hello"
   }
 
 }
-*/
 
 
 

@@ -26,10 +26,10 @@ cat > ca-csr.json <<EOF
   "names": [
     {
       "C": "US",
-      "L": "Portland",
+      "L": "New York City",
       "O": "Kubernetes",
       "OU": "CA",
-      "ST": "Oregon"
+      "ST": "New York"
     }
   ]
 }

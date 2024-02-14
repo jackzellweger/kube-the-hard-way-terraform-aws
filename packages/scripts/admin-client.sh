@@ -10,10 +10,10 @@ cat > admin-csr.json <<EOF
   "names": [
     {
       "C": "US",
-      "L": "Portland",
+      "L": "New York City",
       "O": "system:masters",
       "OU": "Kubernetes The Hard Way",
-      "ST": "Oregon"
+      "ST": "New York"
     }
   ]
 }
