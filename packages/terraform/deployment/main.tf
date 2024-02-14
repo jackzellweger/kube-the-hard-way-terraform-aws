@@ -185,7 +185,7 @@ resource "aws_instance" "kubernetes_control_plane_instances" {
   }
 
   ami = "ami-05fb0b8c1424f266b" // Ubuntu Server 20.04
-  instance_type = "t2.micro"
+  instance_type = "t2.medium"
   security_groups = [aws_security_group.vpc_security_group.id]
   subnet_id = aws_subnet.kubernetes.id
   private_ip = "10.240.0.1${count.index}"
@@ -296,7 +296,7 @@ resource "aws_instance" "kubernetes_worker_instances" {
   }
 
   ami = "ami-05fb0b8c1424f266b" // Ubuntu Server 20.04
-  instance_type = "t2.micro"
+  instance_type = "t2.medium"
   security_groups = [aws_security_group.vpc_security_group.id]
   subnet_id = aws_subnet.kubernetes.id
   private_ip = "10.240.0.2${count.index}"
@@ -334,15 +334,43 @@ resource "aws_eip_association" "worker_eip_assoc" {
   allocation_id = aws_eip.worker_eip[count.index].id
 }
 
-/*
-resource "null_resource" "test_null_resource" {
-    for_each = aws_instance.kubernetes_worker_instances
-    depends_on = [aws_instance.kubernetes_worker_instances]
+// ----- Certificates
 
-    each.
-    
+// Certificate authority and admin-client certificate generation
+resource "null_resource" "generate_certs_no_template" {
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  provisioner "local-exec" {
+    command = "zsh ../../scripts/cert-authority.sh && zsh ../../scripts/admin-client.sh"
+  }
+
 }
-*/
+
+// Kubelet client certificate generation
+resource "null_resource" "generate_certs_template" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+  
+  // Enforces DAG for cert generation
+  depends_on = [ 
+      null_resource.generate_certs_no_template,
+      aws_eip.control_plane_eip, 
+      aws_eip_association.control_plane_eip_assoc,
+      aws_eip.worker_eip,
+      aws_eip_association.worker_eip_assoc
+    ]
+
+  provisioner "local-exec" {
+    // TODO: Could be wrong
+    command = "zsh ../../scripts/client.sh ${aws_instance.kubernetes_worker_instances.tags["InstanceType"]}"
+  }
+
+}
 
 
 
