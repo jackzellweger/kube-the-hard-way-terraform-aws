@@ -345,7 +345,7 @@ resource "null_resource" "generate_certs_no_template" {
 
   // This doesn't depend on any information created dynamically when we run terraform apply
   provisioner "local-exec" {
-    command = "zsh ../../scripts/cert-authority.sh && zsh ../../scripts/admin-client.sh"
+    command = "zsh ../../scripts/cert-authority.sh; zsh ../../scripts/admin-client.sh"
   }
 
 }
@@ -390,7 +390,7 @@ resource "null_resource" "generate_controller_manager_cert" {
   ]
 
   provisioner "local-exec" {
-    command = "bash echo hello"
+    command = "echo hello"
   }
 
 }
