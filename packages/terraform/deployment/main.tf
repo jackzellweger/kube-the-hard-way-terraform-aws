@@ -351,7 +351,7 @@ resource "null_resource" "generate_certs_no_template" {
 }
 
 // Kubelet client certificate generation
-resource "null_resource" "generate_certs_template" {
+resource "null_resource" "generate_client_cert" {
   
   // This ensure this re-runs every time we deploy
   triggers = {
@@ -376,7 +376,8 @@ resource "null_resource" "generate_certs_template" {
 }
 
 // Controller manager client certificate
-resource "null_resource" "generate_certs_template" {
+// TODO: Choose either '-' or '_' between characters, not both
+resource "null_resource" "generate_controller_manager_cert" {
   
   // This ensure this re-runs every time we deploy
   triggers = {
@@ -385,7 +386,7 @@ resource "null_resource" "generate_certs_template" {
 
   // Enforces the DAG
   depends_on = [
-    null_resource.generate_certs_template
+    null_resource.generate_client_cert
   ]
 
   provisioner "local-exec" {
