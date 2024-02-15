@@ -154,24 +154,25 @@ resource "aws_security_group" "vpc_security_group" {
 
 }
 
-/* TODO: Uncomment when we have more IPs available
+// TODO: Uncomment when we have more IPs available
+// TODO: Is this domain = vpc?
 // Static IP for our load balancer
 // TODO: Do we need to create a gateway and associate this with it?
 // Let's wait and see
-resource "aws_eip" "kubernetes-the-hard-way" {
+resource "aws_eip" "kubernetes_the_hard_way" {
 
   // GCloud Command:
   // gcloud compute addresses create kubernetes-the-hard-way \
   // --region $(gcloud config get-value compute/region)
 
   tags = {
-    Name = "kubernetes-the-hard-way"
+    Name = "kubernetes_the_hard_way"
   }
 
   domain = "vpc"
 
 }
-*/
+
 
 // Control Plane nodes
 resource "aws_instance" "kubernetes_control_plane_instances" {
@@ -377,7 +378,7 @@ resource "null_resource" "generate_client_cert" {
 
 // Controller manager client certificate
 // TODO: Choose either '-' or '_' between characters, not both
-resource "null_resource" "generate_controller_manager_cert" {
+resource "null_resource" "generate_controller_manager_client_cert" {
   
   // This ensure this re-runs every time we deploy
   triggers = {
@@ -390,10 +391,124 @@ resource "null_resource" "generate_controller_manager_cert" {
   ]
 
   provisioner "local-exec" {
-    command = "echo hello"
+    command = "zsh ../../scripts/controller-manager-client.sh"
   }
 
 }
 
+// Kube proxy client certificate
+resource "null_resource" "generate_kube_proxy_client_cert" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
 
+  // Enforces the DAG
+  depends_on = [
+    null_resource.generate_controller_manager_client_cert
+  ]
+
+  provisioner "local-exec" {
+    command = "zsh ../../scripts/kube-proxy-client.sh"
+  }
+
+}
+
+// Generate kube scheduler certificate
+resource "null_resource" "generate_kube_scheduler_cert" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.generate_kube_proxy_client_cert
+  ]
+
+  provisioner "local-exec" {
+    command = "zsh ../../scripts/kube-scheduler.sh"
+  }
+
+}
+
+// Generate API server certificate
+resource "null_resource" "generate_kube_api_server_cert" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.generate_kube_scheduler_cert
+  ]
+
+  provisioner "local-exec" {
+    command = "bash ../../scripts/api-server.sh ${aws_eip.kubernetes_the_hard_way.public_ip} \"${join(" ", aws_instance.kubernetes_control_plane_instances.*.private_ip)}\""
+  }
+
+}
+
+// Generate service account key pair
+resource "null_resource" "generate_service_account_key_pair" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.generate_kube_api_server_cert
+  ]
+
+  provisioner "local-exec" {
+    command = "zsh ../../scripts/kubeconfig-worker.sh"
+  }
+
+}
+
+// Distribute certs and key pair to controller and worker instances
+// Try using user data here...
+// ... code here ...
+// https://github.com/kelseyhightower/kubernetes-the-hard-way/blob/master/docs/04-certificate-authority.md
+
+// Generate kubeconfig
+resource "null_resource" "generate_kubeconfig_worker" {
+
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.generate_service_account_key_pair
+  ]
+
+  provisioner "local-exec" {
+    command = "zsh ../../scripts/kubeconfig_worker.sh"
+  }
+
+}
+
+// Consider using "time_sleep" resources:
+/*
+resource "null_resource" "previous" {}
+
+resource "time_sleep" "wait_30_seconds" {
+  depends_on = [null_resource.previous]
+
+  create_duration = "30s"
+}
+
+# This resource will create (at least) 30 seconds after null_resource.previous
+resource "null_resource" "next" {
+  depends_on = [time_sleep.wait_30_seconds]
+}
+*/
 

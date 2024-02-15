@@ -2,9 +2,7 @@ base_name=$1 # Base name for workers
 
 num_workers=$2 # Number of workers
 
-# IFS=' ' read -r -A external_ips <<< "$3"
-
-# old
+# must be run with 'bash' interepreter for this to work
 external_ips=($3)
 
 for i in $(seq 0 $((num_workers - 1))); do
