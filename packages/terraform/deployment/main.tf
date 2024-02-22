@@ -338,15 +338,22 @@ resource "aws_eip_association" "worker_eip_assoc" {
 
 // ----- Certificates
 
+// TODO: Figure out if we can generate these on-instance with user_data args
+
+
+
 // Certificate authority and admin-client certificate generation
 resource "null_resource" "generate_certs_no_template" {
   triggers = {
     always_run = "${timestamp()}"
   }
 
+  // Doesn't depend on any information generated at apply time
+  // ...
+
   // This doesn't depend on any information created dynamically when we run terraform apply
   provisioner "local-exec" {
-    command = "zsh ../../scripts/cert-authority.sh; zsh ../../scripts/admin-client.sh"
+    command = "bash ../../scripts/cert-authority.sh; bash ../../scripts/admin-client.sh"
   }
 
 }
@@ -370,7 +377,7 @@ resource "null_resource" "generate_client_cert" {
 
   provisioner "local-exec" {
     // TODO: Make this dynamic: on worker names
-    // Using bash instead of zsh because it's difficult to read in the array of IPs with zsh
+
     command = "bash ../../scripts/client.sh worker ${var.worker_instance_count} \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
   }
 
@@ -391,7 +398,7 @@ resource "null_resource" "generate_controller_manager_client_cert" {
   ]
 
   provisioner "local-exec" {
-    command = "zsh ../../scripts/controller-manager-client.sh"
+    command = "bash ../../scripts/controller-manager-client.sh"
   }
 
 }
@@ -410,7 +417,7 @@ resource "null_resource" "generate_kube_proxy_client_cert" {
   ]
 
   provisioner "local-exec" {
-    command = "zsh ../../scripts/kube-proxy-client.sh"
+    command = "bash ../../scripts/kube-proxy-client.sh"
   }
 
 }
@@ -429,7 +436,7 @@ resource "null_resource" "generate_kube_scheduler_cert" {
   ]
 
   provisioner "local-exec" {
-    command = "zsh ../../scripts/kube-scheduler.sh"
+    command = "bash ../../scripts/kube-scheduler.sh"
   }
 
 }
@@ -467,7 +474,7 @@ resource "null_resource" "generate_service_account_key_pair" {
   ]
 
   provisioner "local-exec" {
-    command = "zsh ../../scripts/kubeconfig-worker.sh"
+    command = "bash ../../scripts/service-account-key-pair.sh"
   }
 
 }
@@ -478,6 +485,7 @@ resource "null_resource" "generate_service_account_key_pair" {
 // https://github.com/kelseyhightower/kubernetes-the-hard-way/blob/master/docs/04-certificate-authority.md
 
 // Generate kubeconfig
+/*
 resource "null_resource" "generate_kubeconfig_worker" {
 
   // This ensure this re-runs every time we deploy
@@ -491,10 +499,11 @@ resource "null_resource" "generate_kubeconfig_worker" {
   ]
 
   provisioner "local-exec" {
-    command = "zsh ../../scripts/kubeconfig_worker.sh"
+    command = "bash ../../scripts/kubeconfig_worker.sh"
   }
 
 }
+*/
 
 // Consider using "time_sleep" resources:
 /*
