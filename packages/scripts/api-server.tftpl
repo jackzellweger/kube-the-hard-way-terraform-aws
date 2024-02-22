@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# Parameters
+kube_public_address="${kube_public_address}"
+control_plane_node_hostnames="${control_plane_node_hostnames}"
+
+# Convert control plane node hostnames list to comma-separated string
+control_plane_node_hostnames_list=$(echo "$control_plane_node_hostnames" | tr ' ' ',')
+
+# Built-in from the source
+KUBERNETES_HOSTNAMES="kubernetes,kubernetes.default,kubernetes.default.svc,kubernetes.default.svc.cluster,kubernetes.svc.cluster.local"
+
+cat > kubernetes-csr.json <<EOF
+{
+  "CN": "kubernetes",
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+    {
+      "C": "US",
+      "L": "New York City",
+      "O": "Kubernetes",
+      "OU": "Kubernetes The Hard Way",
+      "ST": "New York"
+    }
+  ]
+}
+EOF
+
+echo
+echo "kubernetes public address"
+echo ${kube_public_address}
+echo
+echo "control plane hostnames list:"
+echo ${control_plane_node_hostnames_list}
+echo
+
+# Generate Kubernetes certificates
+cfssl gencert \
+  -ca=ca.pem \
+  -ca-key=ca-key.pem \
+  -config=ca-config.json \
+  -hostname=10.32.0.1,${control_plane_node_hostnames_list},${kube_public_address},127.0.0.1,${KUBERNETES_HOSTNAMES} \
+  -profile=kubernetes \
+  kubernetes-csr.json | cfssljson -bare kubernetes
+
+# Store the pod-cidr value for later use
+echo "${worker_pod_cidr}" > /home/ubuntu/pod-cidr

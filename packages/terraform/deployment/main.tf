@@ -152,6 +152,15 @@ resource "aws_security_group" "vpc_security_group" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  // Allow all outbound traffic
+  // TODO: Fix this, make it less looose
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
 }
 
 // TODO: Uncomment when we have more IPs available
@@ -311,13 +320,36 @@ resource "aws_instance" "kubernetes_worker_instances" {
   // Role for worker is same as control
   iam_instance_profile = aws_iam_instance_profile.control_plane_instance_profile.name
 
-  // Inject the correct CIDR block for pods to expose to node
-  // TODO: Maybe find a way to make this a local configurable variable
+  // TODO: Don't forget to inject the correct CIDR block for pods to expose to node
+
+
+  // TODO: Configure this to run all our scripts, then do a cleanup
+  user_data = <<-EOF
+              ${templatefile("../../scripts/setup.sh", { var1 = "value1" })}
+              EOF
+  
+  /*
   user_data = <<-EOF
                 #!/bin/bash
                 # Store the pod-cidr value for later use
                 echo "10.200.${count.index}.0/24" > /home/ubuntu/pod-cidr
+
+                # Install cfssl
+                sudo curl -s -L -o /bin/cfssl https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
+                sudo curl -s -L -o /bin/cfssljson https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+                sudo curl -s -L -o /bin/cfssl-certinfo https://pkg.cfssl.org/R1.2/cfssl-certinfo_linux-amd64
+                sudo chmod +x /bin/cfssl*
               EOF
+  */
+
+  // New user data w/ template
+  /*
+    user_data = templatefile("../../scripts/user_data_template.tpl", {
+    kube_public_address = aws_eip.kubernetes_the_hard_way.public_ip,
+    control_plane_node_hostnames = join(",", aws_instance.kubernetes_control_plane_instances.*.private_ip),
+    worker_pod_cidr = "10.200.${count.index}.0/24" // This is an additional variable to store the pod CIDR block
+  })
+  */
 
 }
 
