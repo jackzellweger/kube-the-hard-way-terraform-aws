@@ -6,6 +6,11 @@ provider "aws" {
 
 // ----- Variables
 
+variable "private-key-filename" {
+  type = string
+  default = "ssh-private-key"
+}
+
 variable "control_plane_instance_count" {
   type = number
   default = 2
@@ -196,6 +201,8 @@ resource "aws_instance" "kubernetes_control_plane_instances" {
 
   ami = "ami-05fb0b8c1424f266b" // Ubuntu Server 20.04
   instance_type = "t2.medium"
+
+  key_name = aws_key_pair.generated_key.key_name
   security_groups = [aws_security_group.vpc_security_group.id]
   subnet_id = aws_subnet.kubernetes.id
   private_ip = "10.240.0.1${count.index}"
@@ -307,6 +314,8 @@ resource "aws_instance" "kubernetes_worker_instances" {
 
   ami = "ami-05fb0b8c1424f266b" // Ubuntu Server 20.04
   instance_type = "t2.medium"
+
+  key_name = aws_key_pair.generated_key.key_name
   security_groups = [aws_security_group.vpc_security_group.id]
   subnet_id = aws_subnet.kubernetes.id
   private_ip = "10.240.0.2${count.index}"
@@ -320,41 +329,18 @@ resource "aws_instance" "kubernetes_worker_instances" {
   // Role for worker is same as control
   iam_instance_profile = aws_iam_instance_profile.control_plane_instance_profile.name
 
-  // TODO: Don't forget to inject the correct CIDR block for pods to expose to node
-
-
-  // TODO: Configure this to run all our scripts, then do a cleanup
-  // - Include a '#!/bin/bash' at beginning of this?
-  // TODO: This only works if you have a shebang (#!/bin/bash)
-  // Wonder if you can just put the shebang after the EOF?
   user_data = <<-EOF
+              #!/bin/bash
               ${templatefile("../../scripts/pod-cidr.sh.tftpl", { count_index = count.index }) }
               EOF
-  
-  /*
-  user_data = <<-EOF
-                #!/bin/bash
-                # Store the pod-cidr value for later use
-                echo "10.200.${count.index}.0/24" > /home/ubuntu/pod-cidr
+              // Install cfssl, this only works if we're building certs remotely,
+              // which we can't do because we need shared CA.
+              // sudo curl -s -L -o /bin/cfssl https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
+              // sudo curl -s -L -o /bin/cfssljson https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+              // sudo curl -s -L -o /bin/cfssl-certinfo https://pkg.cfssl.org/R1.2/cfssl-certinfo_linux-amd64
+              // sudo chmod +x /bin/cfssl*
 
-                # Install cfssl
-                sudo curl -s -L -o /bin/cfssl https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
-                sudo curl -s -L -o /bin/cfssljson https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
-                sudo curl -s -L -o /bin/cfssl-certinfo https://pkg.cfssl.org/R1.2/cfssl-certinfo_linux-amd64
-                sudo chmod +x /bin/cfssl*
-              EOF
-  */
-
-  // New user data w/ template
-  /*
-    user_data = templatefile("../../scripts/user_data_template.tpl", {
-    kube_public_address = aws_eip.kubernetes_the_hard_way.public_ip,
-    control_plane_node_hostnames = join(",", aws_instance.kubernetes_control_plane_instances.*.private_ip),
-    worker_pod_cidr = "10.200.${count.index}.0/24" // This is an additional variable to store the pod CIDR block
-  })
-  */
-
-}
+  }
 
 // EIPs for worker nodes
 resource "aws_eip" "worker_eip" {
@@ -376,7 +362,7 @@ resource "aws_eip_association" "worker_eip_assoc" {
 // TODO: Figure out if we can generate these on-instance with user_data args
 
 
-/*
+
 // Certificate authority and admin-client certificate generation
 resource "null_resource" "generate_certs_no_template" {
   triggers = {
@@ -411,9 +397,10 @@ resource "null_resource" "generate_client_cert" {
     ]
 
   provisioner "local-exec" {
-    // TODO: Make this dynamic: on worker names
 
+    // TODO: Make this dynamic: on worker names
     command = "bash ../../scripts/client.sh worker ${var.worker_instance_count} \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
+
   }
 
 }
@@ -495,6 +482,24 @@ resource "null_resource" "generate_kube_api_server_cert" {
 
 }
 
+// Worker node private key for SSH
+// https://stackoverflow.com/questions/49743220/how-to-create-an-ssh-key-in-terraform
+resource "tls_private_key" "worker_ssh_private_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "generated_key" { // We are using the same key pair for all instances
+  key_name   = "worker-ssh-key-amazon-name"
+  public_key = tls_private_key.worker_ssh_private_key.public_key_openssh
+
+  // Output .pem private key file
+  provisioner "local-exec" { // Create .pem locally, remove old one if it exists
+    command = "rm -f ./${var.private-key-filename}.pem; echo '${tls_private_key.worker_ssh_private_key.private_key_pem}' > ./${var.private-key-filename}.pem"
+  }
+
+}
+
 // Generate service account key pair
 resource "null_resource" "generate_service_account_key_pair" {
   
@@ -514,17 +519,18 @@ resource "null_resource" "generate_service_account_key_pair" {
 
 }
 
-*/
+// Wait for 30s
+resource "time_sleep" "wait_30_seconds" {
+    
+    depends_on = [null_resource.generate_service_account_key_pair]
+    create_duration = "30s"
 
-// Distribute certs and key pair to controller and worker instances
-// Try using user data here...
-// ... code here ...
-// https://github.com/kelseyhightower/kubernetes-the-hard-way/blob/master/docs/04-certificate-authority.md
+}
 
-// Generate kubeconfig
-/*
-resource "null_resource" "generate_kubeconfig_worker" {
 
+// Distribute certs to workers
+resource "null_resource" "distribute_certs_worker" {
+  
   // This ensure this re-runs every time we deploy
   triggers = {
     always_run = "${timestamp()}"
@@ -532,29 +538,52 @@ resource "null_resource" "generate_kubeconfig_worker" {
 
   // Enforces the DAG
   depends_on = [
-    null_resource.generate_service_account_key_pair
+    time_sleep.wait_30_seconds
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/kubeconfig_worker.sh"
+    // TODO: Do this for control planes as well... currently only workers...
+    command = "bash ../../scripts/distribute-certs-worker.sh \"${join(" ", [for instance in aws_instance.kubernetes_worker_instances : instance.tags["Name"]])}\" ${var.private-key-filename} ubuntu \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
   }
 
 }
-*/
 
-// Consider using "time_sleep" resources:
-/*
-resource "null_resource" "previous" {}
+// Distribute certs to controllers
+resource "null_resource" "distribute_certs_controller" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
 
-resource "time_sleep" "wait_30_seconds" {
-  depends_on = [null_resource.previous]
+  // Enforces the DAG
+  depends_on = [
+    null_resource.distribute_certs_worker
+  ]
 
-  create_duration = "30s"
+  provisioner "local-exec" {
+    // TODO: Do this for control planes as well... currently only workers...
+    command = "bash ../../scripts/distribute-certs-controller.sh \"${join(" ", [for instance in aws_instance.kubernetes_control_plane_instances : instance.tags["Name"]])}\" ${var.private-key-filename} ubuntu \"${join(" ", aws_eip.control_plane_eip.*.public_ip)}\""
+  }
+
 }
 
-# This resource will create (at least) 30 seconds after null_resource.previous
-resource "null_resource" "next" {
-  depends_on = [time_sleep.wait_30_seconds]
-}
-*/
+// Distribute certs to controllers
+resource "null_resource" "clean_up_cert_gen" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
 
+  // Enforces the DAG
+  depends_on = [
+    null_resource.distribute_certs_controller
+  ]
+
+  provisioner "local-exec" {
+    // TODO: Do this for control planes as well... currently only workers...
+    command = "bash rm -f *.csr *.pem *.json"
+  }
+
+}
