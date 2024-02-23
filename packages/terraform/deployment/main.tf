@@ -581,3 +581,5 @@ resource "null_resource" "clean_up_cert_gen" {
   }
 
 }
+
+// Chapter 5: Kubeconfig gen
