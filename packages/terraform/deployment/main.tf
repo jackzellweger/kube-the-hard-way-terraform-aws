@@ -521,12 +521,9 @@ resource "null_resource" "generate_service_account_key_pair" {
 
 // Wait for 30s
 resource "time_sleep" "wait_30_seconds" {
-    
     depends_on = [null_resource.generate_service_account_key_pair]
     create_duration = "30s"
-
 }
-
 
 // Distribute certs to workers
 resource "null_resource" "distribute_certs_worker" {
@@ -542,7 +539,6 @@ resource "null_resource" "distribute_certs_worker" {
   ]
 
   provisioner "local-exec" {
-    // TODO: Do this for control planes as well... currently only workers...
     command = "bash ../../scripts/distribute-certs-worker.sh \"${join(" ", [for instance in aws_instance.kubernetes_worker_instances : instance.tags["Name"]])}\" ${var.private-key-filename} ubuntu \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
   }
 
@@ -562,7 +558,6 @@ resource "null_resource" "distribute_certs_controller" {
   ]
 
   provisioner "local-exec" {
-    // TODO: Do this for control planes as well... currently only workers...
     command = "bash ../../scripts/distribute-certs-controller.sh \"${join(" ", [for instance in aws_instance.kubernetes_control_plane_instances : instance.tags["Name"]])}\" ${var.private-key-filename} ubuntu \"${join(" ", aws_eip.control_plane_eip.*.public_ip)}\""
   }
 
@@ -582,8 +577,7 @@ resource "null_resource" "clean_up_cert_gen" {
   ]
 
   provisioner "local-exec" {
-    // TODO: Do this for control planes as well... currently only workers...
-    command = "bash rm -f *.csr *.pem *.json"
+    command = "rm -f *.csr *.pem *.json"
   }
 
 }
