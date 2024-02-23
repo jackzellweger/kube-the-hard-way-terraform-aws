@@ -324,8 +324,11 @@ resource "aws_instance" "kubernetes_worker_instances" {
 
 
   // TODO: Configure this to run all our scripts, then do a cleanup
+  // - Include a '#!/bin/bash' at beginning of this?
+  // TODO: This only works if you have a shebang (#!/bin/bash)
+  // Wonder if you can just put the shebang after the EOF?
   user_data = <<-EOF
-              ${templatefile("../../scripts/setup.sh", { var1 = "value1" })}
+              ${templatefile("../../scripts/pod-cidr.sh.tftpl", { count_index = count.index }) }
               EOF
   
   /*
@@ -373,7 +376,7 @@ resource "aws_eip_association" "worker_eip_assoc" {
 // TODO: Figure out if we can generate these on-instance with user_data args
 
 
-
+/*
 // Certificate authority and admin-client certificate generation
 resource "null_resource" "generate_certs_no_template" {
   triggers = {
@@ -510,6 +513,8 @@ resource "null_resource" "generate_service_account_key_pair" {
   }
 
 }
+
+*/
 
 // Distribute certs and key pair to controller and worker instances
 // Try using user data here...
