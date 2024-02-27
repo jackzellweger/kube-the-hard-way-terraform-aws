@@ -563,7 +563,104 @@ resource "null_resource" "distribute_certs_controller" {
 
 }
 
-// Distribute certs to controllers
+// Generate kubeconfig for workers
+resource "null_resource" "generate_kubeconfig_worker" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.distribute_certs_controller
+  ]
+
+  provisioner "local-exec" {
+    command = "bash ../../scripts/kubeconfig-kubeproxy.sh \"${join(" ", [for instance in aws_instance.kubernetes_worker_instances : instance.tags["Name"]])}\" ${aws_eip.kubernetes_the_hard_way.public_ip}"
+  }
+
+}
+
+// Generate kubeconfig for kubeproxy
+resource "null_resource" "generate_kubeconfig_kubeproxy" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.generate_kubeconfig_worker
+  ]
+
+  provisioner "local-exec" {
+    command = "bash ../../scripts/kubeconfig-kubeproxy.sh ${aws_eip.kubernetes_the_hard_way.public_ip}"
+  }
+
+}
+
+// Generate kubeconfig for kube controller manager
+resource "null_resource" "generate_kubeconfig_controllermanager" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.generate_kubeconfig_kubeproxy
+  ]
+
+  provisioner "local-exec" {
+    command = "bash ../../scripts/kubeconfig-controller-manager.sh"
+  }
+
+}
+
+// Generate kubeconfig for kube scheduler
+resource "null_resource" "generate_kubeconfig_kubescheduler" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.generate_kubeconfig_controllermanager
+  ]
+
+  provisioner "local-exec" {
+    command = "bash ../../scripts/kubeconfig-kubescheduler.sh"
+  }
+
+}
+
+// Generate kubeconfig for admin user
+resource "null_resource" "generate_kubeconfig_adminuser" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.generate_kubeconfig_kubescheduler
+  ]
+
+  provisioner "local-exec" {
+    command = "bash ../../scripts/kubeconfig-admin.sh"
+  }
+
+}
+
+
+// Clean up certs artifacts
+/*
 resource "null_resource" "clean_up_cert_gen" {
   
   // This ensure this re-runs every time we deploy
@@ -581,5 +678,4 @@ resource "null_resource" "clean_up_cert_gen" {
   }
 
 }
-
-// Chapter 5: Kubeconfig gen
+*/
