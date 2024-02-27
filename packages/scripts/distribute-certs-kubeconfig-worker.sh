@@ -1,6 +1,6 @@
 {   
     # Must be using bash for this to work
-    controller_list=($1)
+    worker_list=($1)
 
     # Vars
     key_filename=$2
@@ -10,8 +10,8 @@
     # Echo vars
     echo
 
-    echo Controller List:
-    for worker in "${controller_list[@]}"; do
+    echo Worker List:
+    for worker in "${worker_list[@]}"; do
         echo $worker
     done
     echo
@@ -36,22 +36,22 @@
     echo
 
     # See command
-    echo Running command...
+    echo Command:
     echo "scp -i ${key_filename}.pem ${cert_name}.txt ${ec2_user}@${ips[i]}:~/."
     echo
 
     echo
 
     # Proper permissions on key for file transfer
-    # This is already getting taken care of in distribute-certs-worker.sh
-    #chmod 400 ${key_filename}.pem
+    chmod 400 ${key_filename}.pem
 
     # DNS name looks like: 'mec2-50-17-16-67.compute-1.amazonaws.com'
     # TODO: Replace .txt with .pem or whatever
-    for ((i=0; i<${#controller_list[@]}; i++)); do
+    for ((i=0; i<${#worker_list[@]}; i++)); do
         # This is what it's supposed to look like when interpolated:
         # scp -o StrictHostKeyChecking=no -i worker-ssh-private-key.pem test.txt ubuntu@3.130.100.52:~/.
-        scp -o StrictHostKeyChecking=no -i ${key_filename}.pem ca.pem ca-key.pem kubernetes-key.pem kubernetes.pem service-account-key.pem service-account.pem ${ec2_user}@${ips[i]}:~/.
+        scp -o StrictHostKeyChecking=no -i ${key_filename}.pem ca.pem ${worker_list[i]}-key.pem ${worker_list[i]}.pem ${ec2_user}@${ips[i]}:~/.
+        scp -o StrictHostKeyChecking=no -i ${key_filename}.pem ${worker_list[i]}.kubeconfig kube-proxy.kubeconfig ${ec2_user}@${ips[i]}:~/.
     done
 
 }

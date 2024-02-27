@@ -8,7 +8,7 @@
     kubectl config set-cluster kubernetes-the-hard-way \
       --certificate-authority=ca.pem \
       --embed-certs=true \
-      --server=https://$2:6443 \
+      --server=https://${2}:6443 \
       --kubeconfig=${worker_list[i]}.kubeconfig
 
     kubectl config set-credentials system:node:${worker_list[i]} \

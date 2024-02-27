@@ -333,12 +333,6 @@ resource "aws_instance" "kubernetes_worker_instances" {
               #!/bin/bash
               ${templatefile("../../scripts/pod-cidr.sh.tftpl", { count_index = count.index }) }
               EOF
-              // Install cfssl, this only works if we're building certs remotely,
-              // which we can't do because we need shared CA.
-              // sudo curl -s -L -o /bin/cfssl https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
-              // sudo curl -s -L -o /bin/cfssljson https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
-              // sudo curl -s -L -o /bin/cfssl-certinfo https://pkg.cfssl.org/R1.2/cfssl-certinfo_linux-amd64
-              // sudo chmod +x /bin/cfssl*
 
   }
 
@@ -525,8 +519,10 @@ resource "time_sleep" "wait_30_seconds" {
     create_duration = "30s"
 }
 
-// Distribute certs to workers
-resource "null_resource" "distribute_certs_worker" {
+// NOTE: Removed distribute certs from here -----
+
+// Generate kubeconfig for workers
+resource "null_resource" "generate_kubeconfig_worker" {
   
   // This ensure this re-runs every time we deploy
   triggers = {
@@ -539,45 +535,7 @@ resource "null_resource" "distribute_certs_worker" {
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/distribute-certs-worker.sh \"${join(" ", [for instance in aws_instance.kubernetes_worker_instances : instance.tags["Name"]])}\" ${var.private-key-filename} ubuntu \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
-  }
-
-}
-
-// Distribute certs to controllers
-resource "null_resource" "distribute_certs_controller" {
-  
-  // This ensure this re-runs every time we deploy
-  triggers = {
-    always_run = "${timestamp()}"
-  }
-
-  // Enforces the DAG
-  depends_on = [
-    null_resource.distribute_certs_worker
-  ]
-
-  provisioner "local-exec" {
-    command = "bash ../../scripts/distribute-certs-controller.sh \"${join(" ", [for instance in aws_instance.kubernetes_control_plane_instances : instance.tags["Name"]])}\" ${var.private-key-filename} ubuntu \"${join(" ", aws_eip.control_plane_eip.*.public_ip)}\""
-  }
-
-}
-
-// Generate kubeconfig for workers
-resource "null_resource" "generate_kubeconfig_worker" {
-  
-  // This ensure this re-runs every time we deploy
-  triggers = {
-    always_run = "${timestamp()}"
-  }
-
-  // Enforces the DAG
-  depends_on = [
-    null_resource.distribute_certs_controller
-  ]
-
-  provisioner "local-exec" {
-    command = "bash ../../scripts/kubeconfig-kubeproxy.sh \"${join(" ", [for instance in aws_instance.kubernetes_worker_instances : instance.tags["Name"]])}\" ${aws_eip.kubernetes_the_hard_way.public_ip}"
+    command = "bash ../../scripts/kubeconfig-worker.sh \"${join(" ", [for instance in aws_instance.kubernetes_worker_instances : instance.tags["Name"]])}\" ${aws_eip.kubernetes_the_hard_way.public_ip}"
   }
 
 }
@@ -658,10 +616,8 @@ resource "null_resource" "generate_kubeconfig_adminuser" {
 
 }
 
-
-// Clean up certs artifacts
-/*
-resource "null_resource" "clean_up_cert_gen" {
+// Generate configuration for data and control plane encryption at-rest
+resource "null_resource" "generate_config_encryption" {
   
   // This ensure this re-runs every time we deploy
   triggers = {
@@ -670,12 +626,68 @@ resource "null_resource" "clean_up_cert_gen" {
 
   // Enforces the DAG
   depends_on = [
-    null_resource.distribute_certs_controller
+    null_resource.generate_kubeconfig_adminuser
   ]
 
   provisioner "local-exec" {
-    command = "rm -f *.csr *.pem *.json"
+    command = "bash ../../scripts/data-encryption.sh"
   }
 
 }
-*/
+
+// Distribute certs & kubeconfig to workers
+resource "null_resource" "distribute_certs_kubeconfig_worker" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.generate_config_encryption
+  ]
+
+  provisioner "local-exec" {
+    command = "bash ../../scripts/distribute-certs-kubeconfig-worker.sh \"${join(" ", [for instance in aws_instance.kubernetes_worker_instances : instance.tags["Name"]])}\" ${var.private-key-filename} ubuntu \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
+  }
+
+}
+
+// Distribute certs, kubeconfig, and encryption configuration to controllers
+resource "null_resource" "distribute_certs_kubeconfig_controller" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.distribute_certs_kubeconfig_worker
+  ]
+
+  provisioner "local-exec" {
+    command = "bash ../../scripts/distribute-certs-kubeconfig-controller.sh \"${join(" ", [for instance in aws_instance.kubernetes_control_plane_instances : instance.tags["Name"]])}\" ${var.private-key-filename} ubuntu \"${join(" ", aws_eip.control_plane_eip.*.public_ip)}\""
+  }
+
+}
+
+// Clean up certs & kubeconfig artifacts
+resource "null_resource" "clean_up_artifacts" {
+  
+  // This ensure this re-runs every time we deploy
+  triggers = {
+    always_run = "${timestamp()}"
+  }
+
+  // Enforces the DAG
+  depends_on = [
+    null_resource.distribute_certs_kubeconfig_controller
+  ]
+
+  provisioner "local-exec" {
+    command = "rm -f *.csr *.pem *.json *.kubeconfig"
+  }
+
+}
