@@ -191,6 +191,8 @@ resource "aws_eip" "kubernetes_the_hard_way" {
 // Control Plane nodes
 resource "aws_instance" "kubernetes_control_plane_instances" {
 
+  depends_on = [ tls_private_key.worker_ssh_private_key, aws_key_pair.generated_key ]
+  
   count = var.control_plane_instance_count
   
   tags = {
@@ -212,9 +214,16 @@ resource "aws_instance" "kubernetes_control_plane_instances" {
   }
 
   source_dest_check = false // IP forwarding, 'false' is enabled
-
   iam_instance_profile = aws_iam_instance_profile.control_plane_instance_profile.name
 
+  // TODO: Make it so this executes after cert creation
+  // Could use this: <https://stackoverflow.com/questions/14692353/executing-a-bash-script-upon-file-creation>
+  /*
+  user_data = <<-MULTILINE
+              #!/bin/bash
+              ${templatefile("../../scripts/user-data-etcd.sh.tftpl", { controller_private_ip = "10.240.0.1${count.index}", controller_hostname = "controller-${count.index}" }) }
+              MULTILINE
+  */
 }
 
 // EIPs for contol plane nodes
@@ -353,10 +362,6 @@ resource "aws_eip_association" "worker_eip_assoc" {
 
 // ----- Certificates
 
-// TODO: Figure out if we can generate these on-instance with user_data args
-
-
-
 // Certificate authority and admin-client certificate generation
 resource "null_resource" "generate_certs_no_template" {
   triggers = {
@@ -489,7 +494,7 @@ resource "aws_key_pair" "generated_key" { // We are using the same key pair for 
 
   // Output .pem private key file
   provisioner "local-exec" { // Create .pem locally, remove old one if it exists
-    command = "rm -f ./${var.private-key-filename}.pem; echo '${tls_private_key.worker_ssh_private_key.private_key_pem}' > ./${var.private-key-filename}.pem"
+    command = "rm -f ./${var.private-key-filename}.pem; echo '${tls_private_key.worker_ssh_private_key.private_key_pem}' > ./${var.private-key-filename}.pem; chmod 400 ./${var.private-key-filename}.pem; "
   }
 
 }
@@ -513,13 +518,11 @@ resource "null_resource" "generate_service_account_key_pair" {
 
 }
 
-// Wait for 30s
+// Wait for 30s for openssh server to start on instances
 resource "time_sleep" "wait_30_seconds" {
     depends_on = [null_resource.generate_service_account_key_pair]
     create_duration = "30s"
 }
-
-// NOTE: Removed distribute certs from here -----
 
 // Generate kubeconfig for workers
 resource "null_resource" "generate_kubeconfig_worker" {
@@ -645,6 +648,7 @@ resource "null_resource" "distribute_certs_kubeconfig_worker" {
 
   // Enforces the DAG
   depends_on = [
+    aws_instance.kubernetes_worker_instances,
     null_resource.generate_config_encryption
   ]
 
@@ -664,6 +668,7 @@ resource "null_resource" "distribute_certs_kubeconfig_controller" {
 
   // Enforces the DAG
   depends_on = [
+    aws_instance.kubernetes_control_plane_instances,
     null_resource.distribute_certs_kubeconfig_worker
   ]
 
@@ -671,6 +676,31 @@ resource "null_resource" "distribute_certs_kubeconfig_controller" {
     command = "bash ../../scripts/distribute-certs-kubeconfig-controller.sh \"${join(" ", [for instance in aws_instance.kubernetes_control_plane_instances : instance.tags["Name"]])}\" ${var.private-key-filename} ubuntu \"${join(" ", aws_eip.control_plane_eip.*.public_ip)}\""
   }
 
+}
+
+resource "terraform_data" "controller_bootstrap" {
+  
+  // Count
+  count = var.control_plane_instance_count
+
+  // Re-runs every time we deploy
+  triggers_replace = "${timestamp()}"
+  depends_on = [ null_resource.distribute_certs_kubeconfig_controller ]
+
+
+  connection {
+    type = "ssh"
+    host = aws_eip.control_plane_eip[count.index].public_ip
+    user = "ubuntu"
+    private_key = file("${var.private-key-filename}.pem")
+  }
+
+  provisioner "remote-exec" {
+    inline = [ 
+      "${templatefile("../../scripts/bootstrap-controllers.sh.tftpl", { controller_private_ip = "10.240.0.1${count.index}", controller_hostname = "controller-${count.index}", controller_public_address = aws_eip.kubernetes_the_hard_way.public_ip }) }"
+     ]
+  }
+  
 }
 
 // Clean up certs & kubeconfig artifacts
@@ -683,11 +713,13 @@ resource "null_resource" "clean_up_artifacts" {
 
   // Enforces the DAG
   depends_on = [
-    null_resource.distribute_certs_kubeconfig_controller
+    terraform_data.controller_bootstrap
   ]
 
   provisioner "local-exec" {
-    command = "rm -f *.csr *.pem *.json *.kubeconfig"
+    command = "rm -f *.csr *.pem *.json *.kubeconfig *.yaml"
   }
 
 }
+
+// Resume at 'RBAC for Kubelet Authorization'
