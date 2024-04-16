@@ -1,26 +1,3 @@
-// ----- Providers
-
-provider "aws" {
-  region = "us-east-2"
-}
-
-// ----- Variables
-
-variable "private-key-filename" {
-  type = string
-  default = "ssh-private-key"
-}
-
-variable "control_plane_instance_count" {
-  type = number
-  default = 2
-}
-
-variable "worker_instance_count" {
-  type = number
-  default = 2
-}
-
 // ----- Resources
 
 // Our VPC
@@ -340,9 +317,8 @@ resource "aws_instance" "kubernetes_worker_instances" {
 
   user_data = <<-EOF
               #!/bin/bash
-              ${templatefile("../../scripts/pod-cidr.sh.tftpl", { count_index = count.index }) }
+              ${templatefile("${var.scripts_dir_path}/pod-cidr.sh.tftpl", { count_index = count.index })}
               EOF
-
   }
 
 // EIPs for worker nodes
@@ -373,7 +349,7 @@ resource "null_resource" "generate_certs_no_template" {
 
   // This doesn't depend on any information created dynamically when we run terraform apply
   provisioner "local-exec" {
-    command = "bash ../../scripts/cert-authority.sh; bash ../../scripts/admin-client.sh"
+    command = "bash ${var.scripts_dir_path}/cert-authority.sh; bash ${var.scripts_dir_path}/admin-client.sh"
   }
 
 }
@@ -398,7 +374,7 @@ resource "null_resource" "generate_client_cert" {
   provisioner "local-exec" {
 
     // TODO: Make this dynamic: on worker names
-    command = "bash ../../scripts/client.sh worker ${var.worker_instance_count} \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
+    command = "bash ${var.scripts_dir_path}/client.sh worker ${var.worker_instance_count} \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
 
   }
 
@@ -419,7 +395,7 @@ resource "null_resource" "generate_controller_manager_client_cert" {
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/controller-manager-client.sh"
+    command = "bash ${var.scripts_dir_path}/controller-manager-client.sh"
   }
 
 }
@@ -438,7 +414,7 @@ resource "null_resource" "generate_kube_proxy_client_cert" {
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/kube-proxy-client.sh"
+    command = "bash ${var.scripts_dir_path}/kube-proxy-client.sh"
   }
 
 }
@@ -457,7 +433,7 @@ resource "null_resource" "generate_kube_scheduler_cert" {
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/kube-scheduler.sh"
+    command = "bash ${var.scripts_dir_path}/kube-scheduler.sh"
   }
 
 }
@@ -476,7 +452,7 @@ resource "null_resource" "generate_kube_api_server_cert" {
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/api-server.sh ${aws_eip.kubernetes_the_hard_way.public_ip} \"${join(" ", aws_instance.kubernetes_control_plane_instances.*.private_ip)}\""
+    command = "bash ${var.scripts_dir_path}/api-server.sh ${aws_eip.kubernetes_the_hard_way.public_ip} \"${join(" ", aws_instance.kubernetes_control_plane_instances.*.private_ip)}\""
   }
 
 }
@@ -513,7 +489,7 @@ resource "null_resource" "generate_service_account_key_pair" {
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/service-account-key-pair.sh"
+    command = "bash ${var.scripts_dir_path}/service-account-key-pair.sh"
   }
 
 }
@@ -538,7 +514,7 @@ resource "null_resource" "generate_kubeconfig_worker" {
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/kubeconfig-worker.sh \"${join(" ", [for instance in aws_instance.kubernetes_worker_instances : instance.tags["Name"]])}\" ${aws_eip.kubernetes_the_hard_way.public_ip}"
+    command = "bash ${var.scripts_dir_path}/kubeconfig-worker.sh \"${join(" ", [for instance in aws_instance.kubernetes_worker_instances : instance.tags["Name"]])}\" ${aws_eip.kubernetes_the_hard_way.public_ip}"
   }
 
 }
@@ -557,7 +533,7 @@ resource "null_resource" "generate_kubeconfig_kubeproxy" {
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/kubeconfig-kubeproxy.sh ${aws_eip.kubernetes_the_hard_way.public_ip}"
+    command = "bash ${var.scripts_dir_path}/kubeconfig-kubeproxy.sh ${aws_eip.kubernetes_the_hard_way.public_ip}"
   }
 
 }
@@ -576,7 +552,7 @@ resource "null_resource" "generate_kubeconfig_controllermanager" {
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/kubeconfig-controller-manager.sh"
+    command = "bash ${var.scripts_dir_path}/kubeconfig-controller-manager.sh"
   }
 
 }
@@ -595,7 +571,8 @@ resource "null_resource" "generate_kubeconfig_kubescheduler" {
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/kubeconfig-kubescheduler.sh"
+    #command = "bash ${get_terragrunt_dir()}/../../scripts/kubeconfig-kubescheduler.sh"
+    command = "bash ${var.scripts_dir_path}/kubeconfig-kubescheduler.sh"
   }
 
 }
@@ -614,96 +591,13 @@ resource "null_resource" "generate_kubeconfig_adminuser" {
   ]
 
   provisioner "local-exec" {
-    command = "bash ../../scripts/kubeconfig-admin.sh"
+    command = "bash ${var.scripts_dir_path}/kubeconfig-admin.sh"
   }
 
 }
 
-// Generate configuration for data and control plane encryption at-rest
-resource "null_resource" "generate_config_encryption" {
-  
-  // This ensure this re-runs every time we deploy
-  triggers = {
-    always_run = "${timestamp()}"
-  }
-
-  // Enforces the DAG
-  depends_on = [
-    null_resource.generate_kubeconfig_adminuser
-  ]
-
-  provisioner "local-exec" {
-    command = "bash ../../scripts/data-encryption.sh"
-  }
-
-}
-
-// Distribute certs & kubeconfig to workers
-resource "null_resource" "distribute_certs_kubeconfig_worker" {
-  
-  // This ensure this re-runs every time we deploy
-  triggers = {
-    always_run = "${timestamp()}"
-  }
-
-  // Enforces the DAG
-  depends_on = [
-    aws_instance.kubernetes_worker_instances,
-    null_resource.generate_config_encryption
-  ]
-
-  provisioner "local-exec" {
-    command = "bash ../../scripts/distribute-certs-kubeconfig-worker.sh \"${join(" ", [for instance in aws_instance.kubernetes_worker_instances : instance.tags["Name"]])}\" ${var.private-key-filename} ubuntu \"${join(" ", aws_eip.worker_eip.*.public_ip)}\""
-  }
-
-}
-
-// Distribute certs, kubeconfig, and encryption configuration to controllers
-resource "null_resource" "distribute_certs_kubeconfig_controller" {
-  
-  // This ensure this re-runs every time we deploy
-  triggers = {
-    always_run = "${timestamp()}"
-  }
-
-  // Enforces the DAG
-  depends_on = [
-    aws_instance.kubernetes_control_plane_instances,
-    null_resource.distribute_certs_kubeconfig_worker
-  ]
-
-  provisioner "local-exec" {
-    command = "bash ../../scripts/distribute-certs-kubeconfig-controller.sh \"${join(" ", [for instance in aws_instance.kubernetes_control_plane_instances : instance.tags["Name"]])}\" ${var.private-key-filename} ubuntu \"${join(" ", aws_eip.control_plane_eip.*.public_ip)}\""
-  }
-
-}
-
-resource "terraform_data" "controller_bootstrap" {
-  
-  // Count
-  count = var.control_plane_instance_count
-
-  // Re-runs every time we deploy
-  triggers_replace = "${timestamp()}"
-  depends_on = [ null_resource.distribute_certs_kubeconfig_controller ]
-
-
-  connection {
-    type = "ssh"
-    host = aws_eip.control_plane_eip[count.index].public_ip
-    user = "ubuntu"
-    private_key = file("${var.private-key-filename}.pem")
-  }
-
-  provisioner "remote-exec" {
-    inline = [ 
-      "${templatefile("../../scripts/bootstrap-controllers.sh.tftpl", { controller_private_ip = "10.240.0.1${count.index}", controller_hostname = "controller-${count.index}", controller_public_address = aws_eip.kubernetes_the_hard_way.public_ip }) }"
-     ]
-  }
-  
-}
-
-// Clean up certs & kubeconfig artifacts
+/*
+// Clean up artifacts
 resource "null_resource" "clean_up_artifacts" {
   
   // This ensure this re-runs every time we deploy
@@ -713,13 +607,12 @@ resource "null_resource" "clean_up_artifacts" {
 
   // Enforces the DAG
   depends_on = [
-    terraform_data.controller_bootstrap
+    terraform_data.controller_kubelet_rbac_auth
   ]
 
   provisioner "local-exec" {
-    command = "rm -f *.csr *.pem *.json *.kubeconfig *.yaml"
+    command = "rm -f *.csr *.pem *.kubeconfig *.json *.yaml"
   }
 
 }
-
-// Resume at 'RBAC for Kubelet Authorization'
+*/

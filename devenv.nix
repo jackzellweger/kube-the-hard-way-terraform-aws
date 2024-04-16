@@ -6,7 +6,7 @@ let
   common_packages = with pkgs; [
 
     # Versioning
-    git # vcs CLI
+    git     # vcs CLI
     git-lfs # stores binary files in git host
 
     # Github
@@ -14,11 +14,15 @@ let
 
     # Kubernetes
     (customModule "kubectl") # declarative iac tool
-    cfssl # certificates
+    cfssl                    # certificates
 
     # AWS
-    awscli2 # aws CLI
+    awscli2  # aws CLI
     aws-nuke # nukes resources in aws accounts
+
+    # IaC
+    terraform  # IaC
+    terragrunt # terraform-runner
   ];
 
 in
