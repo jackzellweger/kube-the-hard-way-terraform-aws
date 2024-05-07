@@ -1,5 +1,3 @@
-// ----- Resources
-
 // Our VPC
 resource "aws_vpc" "kubernetes-the-hard-way" {
 

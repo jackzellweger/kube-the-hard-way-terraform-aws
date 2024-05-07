@@ -1,5 +1,3 @@
-// ----- Resources -----
-
 // Generate configuration for data and control plane encryption at-rest
 resource "null_resource" "generate_config_encryption" {
   

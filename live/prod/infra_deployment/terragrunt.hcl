@@ -1,8 +1,12 @@
+locals {
+  common_vars = read_terragrunt_config(find_in_parent_folders("common.hcl"))
+}
+
+
 terraform {
   source = "../../../packages/terraform/infra_deployment"
 }
 
-# Indicate what region to deploy the resources into
 generate "provider" {
   path = "provider.tf"
   if_exists = "overwrite_terragrunt"
@@ -13,16 +17,16 @@ provider "aws" {
 EOF
 }
 
-# Configure inputs to the module
 inputs = {
 
   // Bootstrapping params
-  control_plane_instance_count = 2
-  worker_instance_count = 2
+  control_plane_instance_count = 1
+  worker_instance_count = 1
 
   // Private key names
   private-key-filename = "ssh-private-key"
 
   // Script directory path
-  scripts_dir_path = "${get_terragrunt_dir()}/../../../packages/scripts"
+  scripts_dir_path = local.common_vars.inputs.scripts_dir_path_common
+
 }
